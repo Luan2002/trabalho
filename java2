@@ -1,0 +1,1259 @@
+package br.inf.ibtech.ui.sm;
+
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
+
+import org.apache.commons.collections4.CollectionUtils;
+
+import com.vaadin.data.Property.ValueChangeEvent;
+import com.vaadin.data.Property.ValueChangeListener;
+import com.vaadin.terminal.Sizeable;
+import com.vaadin.terminal.ThemeResource;
+import com.vaadin.ui.Alignment;
+import com.vaadin.ui.Button;
+import com.vaadin.ui.Button.ClickEvent;
+import com.vaadin.ui.Button.ClickListener;
+import com.vaadin.ui.Component;
+import com.vaadin.ui.HorizontalLayout;
+import com.vaadin.ui.HorizontalSplitPanel;
+import com.vaadin.ui.Panel;
+import com.vaadin.ui.Slider;
+import com.vaadin.ui.Slider.ValueOutOfBoundsException;
+import com.vaadin.ui.TabSheet;
+import com.vaadin.ui.TabSheet.SelectedTabChangeEvent;
+import com.vaadin.ui.TabSheet.SelectedTabChangeListener;
+import com.vaadin.ui.TabSheet.Tab;
+import com.vaadin.ui.VerticalLayout;
+import com.vaadin.ui.Window.CloseEvent;
+import com.vaadin.ui.Window.CloseListener;
+import com.vaadin.ui.themes.Reindeer;
+
+import br.inf.ibtech.db.GeoConfig;
+import br.inf.ibtech.db.GeoConfigModulos;
+import br.inf.ibtech.db.GeoMunicipio;
+import br.inf.ibtech.db.GeoMunicipioLatLng;
+import br.inf.ibtech.db.GeoUF;
+import br.inf.ibtech.db.GeoUFLatLng;
+import br.inf.ibtech.db.sm.SMCenario;
+import br.inf.ibtech.db.sm.SMCenarioRegiao;
+import br.inf.ibtech.db.sm.SMTempRegiaoMunicipio;
+import br.inf.ibtech.db.sm.SMTempRegiaoMunicipio.DadoGenerico;
+import br.inf.ibtech.googlemapv3widget.GoogleMap;
+import br.inf.ibtech.googlemapv3widget.LatLng;
+import br.inf.ibtech.googlemapv3widget.Marker;
+import br.inf.ibtech.googlemapv3widget.Overlay;
+import br.inf.ibtech.googlemapv3widget.Overlay.RightClickListener;
+import br.inf.ibtech.googlemapv3widget.Polygon;
+import br.inf.ibtech.googlemapv3widget.Polyline;
+import br.inf.ibtech.model.geo.MunicipioGenericFilter;
+import br.inf.ibtech.ui.geo.ColecaoEditDisplay;
+import br.inf.ibtech.ui.geo.Constante;
+import br.inf.ibtech.ui.geo.LinhaEditDisplay;
+import br.inf.ibtech.ui.geo.MarcaEditDisplay;
+import br.inf.ibtech.ui.geo.MunicipioQueryDetalha;
+import br.inf.ibtech.ui.geo.RepresentanteEditDisplay;
+import br.inf.ibtech.ui.geo.VendasMapaScreenShopPopupPanel;
+import br.inf.ibtech.ui.geo.utils.CamposCoringaEngine;
+import br.inf.ibtech.ui.geo.utils.CamposCoringaEngine.Coringa;
+import br.inf.ibtech.ui.geo.utils.CoresLegenda;
+import br.inf.ibtech.ui.geo.utils.MunicipioEngineQuery;
+import br.inf.ibtech.ui.geo.utils.VendasQueryInterface;
+import br.inf.ibtech.ui.sm.utils.SMLegenda;
+import br.inf.ibtech.ui.sm.utils.SMLegendaClickListener;
+import br.inf.ibtech.ui.sm.utils.SMLegendaItem;
+import br.inf.ibtech.utils.AppData;
+import br.inf.ibtech.utils.Content;
+import br.inf.ibtech.utils.EditDisplay;
+import br.inf.ibtech.utils.ParamsMapFactory;
+import br.inf.ibtech.utils.Table;
+import br.inf.ibtech.utils.TableColumn;
+import br.inf.ibtech.utils.controller.BeanController;
+import br.inf.ibtech.utils.fields.ComboBox;
+import br.inf.ibtech.utils.fields.CustomFieldInterface;
+
+import br.inf.ibtech.utils.ui.BackgroundTaskWin;
+import br.inf.ibtech.utils.concurrent.IBCallable;
+
+public class SMCenarioQueryCobertura extends Content
+implements VendasQueryInterface, ValueChangeListener, ClickListener, RightClickListener, CloseListener,
+SMLegendaClickListener, br.inf.ibtech.googlemapv3widget.Overlay.ClickListener, SelectedTabChangeListener {
+
+	private static final long serialVersionUID = 5472685893180452640L;
+
+	private static final DecimalFormat DF = new DecimalFormat("#,##0.00");
+	private static final DecimalFormat DFSEMDECIMAIS = new DecimalFormat("#,##0");
+
+	private String LABEL_COLECAO;
+	private String LABEL_LINHA_PRODUTO;
+	private String LABEL_MARCA;
+	private String LABEL_CLIENTE;
+	private String LABEL_PROSPECT;
+	private String LABEL_REPRESENTANTE;
+
+	private static final String COR_SEM_COBERTURA = CoresLegenda.getCorSemCobertura();
+	private static final String COR_CONFLITO = CoresLegenda.getCorConflito();
+	private static List<String> CORES = CoresLegenda.getListCores();
+
+	private SMLegenda legenda;
+	private Tab tabLocalizaMunicipio;
+	private TabSheet ts;
+	private GoogleMap map;
+	private SMMaximizarMapaPopup popupMapa;
+	private Map<String, SMTempRegiaoMunicipio> mapTemp;
+	private MunicipioQueryDetalha popupDetalha;
+	private MunicipioEngineQuery municipioEngineQuery;
+	private CamposCoringaEngine camposCoringa;
+	private ColecaoEditDisplay cpColecao;
+	private LinhaEditDisplay cpLinha;
+	private ComboBox<GeoUF> cpUF;
+	private ComboBox<Integer> cpCenario;
+	private Button btnResumoGeral;
+	private Button btnConsultar;
+	private Button btnNovoCenario;
+	private Button btnMaximizar;
+	private HorizontalSplitPanel hsp;
+	private VerticalLayout vlFiltrosGeral;
+	private VerticalLayout vlLegendaPnl;
+	private VerticalLayout vlLegendaAux;
+	private SMLegendaItem legendaSel;
+	private Button btnDetalharTodasRegioes;
+	private Slider slTransparencia;
+
+	private Button btnCapturarTela;
+	private VendasMapaScreenShopPopupPanel winScreenshot;
+	private SMCadastroPopUp winCadastroCenario;
+	private Panel pnLegenda;
+	private Panel pnLegendaAux;
+	private TabSheet tsLegenda;
+	private Table tbLegendas;
+
+	private MarcaEditDisplay cpMarca;
+	private RepresentanteEditDisplay cpRepresentante;
+
+	private List<String> repsConflitantes;
+
+	private boolean isMaster;
+	private MunicipioGenericFilter filters;
+
+	@Override
+	public String getTitle() {
+		return "Consulta de Cenários";
+	}
+
+	@Override
+	public void buildUI() {
+		isMaster = GeoConfig.isMaster();
+
+		mapTemp = new HashMap<>();
+		LABEL_COLECAO = AppData.getVariable("lbColecaoSing").toString();
+		LABEL_LINHA_PRODUTO = AppData.getVariable("lbLinhaProdSing").toString();
+		LABEL_MARCA = AppData.getVariable("lbMarcaSingular").toString();
+		LABEL_CLIENTE = AppData.getVariable("lbClientePlural").toString();
+		LABEL_PROSPECT = AppData.getVariable("lbProspectPlural").toString();
+		LABEL_REPRESENTANTE = "Representante";
+
+		hsp = new HorizontalSplitPanel();
+		hsp.setMinSplitPosition(300, Sizeable.UNITS_PIXELS);
+		hsp.setSizeFull();
+
+		map = new GoogleMap(AppData.getMainWindow());
+		map.setSizeFull();
+		municipioEngineQuery = new MunicipioEngineQuery(map, true);
+
+		ts = new TabSheet();
+		ts.setHeight(100, Sizeable.UNITS_PERCENTAGE);
+		ts.addTab(getTabFiltros(), "Consulta");
+		ts.addTab(getTabResultados(),"Resultado");
+
+		tabLocalizaMunicipio = ts.addTab(municipioEngineQuery.buildUIQuery(), MunicipioEngineQuery.LOCALIZAR_MUNICIPIO);
+		tabLocalizaMunicipio.setEnabled(false);
+		ts.addListener((SelectedTabChangeListener) this);
+
+		resetMap();
+
+		hsp.setFirstComponent(ts);
+		hsp.setSecondComponent(map);
+
+		setContainer(hsp);
+		hsp.setSplitPosition(410, Sizeable.UNITS_PIXELS);
+	}
+	private Component getTabResultados() {                      //-----------------------//--------------------------//-------------//-------//-------------
+		VerticalLayout vl0 = new VerticalLayout();
+		vl0.setWidth(100, Sizeable.UNITS_PERCENTAGE);
+		vl0.setHeight(100, Sizeable.UNITS_PERCENTAGE);
+		vl0.setSpacing(true);
+		vl0.setMargin(true);
+
+		tsLegenda = new TabSheet();
+		tsLegenda.setHeight(100, Sizeable.UNITS_PERCENTAGE);
+		tsLegenda.addTab(getTabLegenda(), "Legendas");
+		tsLegenda.addTab(getTabTabela(), "Tabela");
+		vl0.addComponent(tsLegenda);
+		vl0.setExpandRatio(tsLegenda, 3F);
+
+		return vl0;
+	}
+
+	private Component getTabFiltros() {
+		vlFiltrosGeral = new VerticalLayout();
+		vlFiltrosGeral.setMargin(true);
+
+		VerticalLayout vlFiltros = new VerticalLayout();
+		vlFiltros.setSpacing(true);
+		vlFiltros.setHeight("100%");
+
+		HorizontalLayout hlCenario = new HorizontalLayout();
+		hlCenario.setSpacing(true);
+		hlCenario.setWidth("100%");
+
+		StringBuffer sqlCenario = new StringBuffer("SELECT CAST(r.id AS int), r.nome FROM SMCenario r ");
+		if (isMaster == false) {
+			sqlCenario.append(" INNER JOIN AppUser us ON us.id = r.inclusaousuario_id ");
+			sqlCenario.append(" WHERE us.id = :p1 ");
+			sqlCenario.append("    OR CAST(:p1 AS text) IN (SELECT UNNEST(STRING_TO_ARRAY(r.outrosUsuarios, ','))) ");
+		}
+		sqlCenario.append(" ORDER BY r.nome ");
+
+		cpCenario = new ComboBox<Integer>(Integer.class, "Cenário");
+		cpCenario.setNativeSql(sqlCenario.toString());
+		cpCenario.setSizeFull();
+		if (isMaster == false)
+			cpCenario.setParams(ParamsMapFactory.create(AppData.getAppUser().getId()));
+		cpCenario.setImmediate(true);
+		cpCenario.addListener((ValueChangeListener) this);
+		hlCenario.addComponent(cpCenario);
+		hlCenario.setExpandRatio(cpCenario, 3F);
+
+		btnNovoCenario = new Button("Novo", this);
+		btnNovoCenario.setDescription("Novo Cenário!");
+		btnNovoCenario.setWidth("100");
+		btnNovoCenario.setIcon(new ThemeResource("icones/doc_new_icon&16.png"));
+		btnNovoCenario.setDisableOnClick(true);
+		hlCenario.addComponent(btnNovoCenario);
+		hlCenario.setComponentAlignment(btnNovoCenario, Alignment.BOTTOM_RIGHT);
+
+		vlFiltros.addComponent(hlCenario);
+
+		HorizontalLayout hlEstado = new HorizontalLayout();
+		hlEstado.setSpacing(true);
+		hlEstado.setWidth("100%");
+
+		cpUF = new ComboBox<GeoUF>(GeoUF.class, "Estado");
+		cpUF.setSizeFull();
+		cpUF.setAutoLoad(false);
+		cpUF.setFixOption("Todos");
+		cpUF.addListener((ValueChangeListener) this);
+		cpUF.setPageLength(15);
+		cpUF.setImmediate(true);
+		hlEstado.addComponent(cpUF);
+		hlEstado.setExpandRatio(cpUF, 3F);
+
+		btnConsultar = new Button("Consultar", this);
+		btnConsultar.setIcon(new ThemeResource("icones/zoom_icon&16.png"));
+		btnConsultar.setDisableOnClick(true);
+		hlEstado.addComponent(btnConsultar);
+		hlEstado.setComponentAlignment(btnConsultar, Alignment.BOTTOM_RIGHT);
+
+		vlFiltros.addComponent(hlEstado);
+
+		cpColecao = new ColecaoEditDisplay(true, LABEL_COLECAO);
+		cpColecao.setWidth("100%");
+		cpColecao.getDisplay().setSizeFull();
+		cpColecao.getComponent(0).setWidth("100%");
+		((HorizontalLayout) cpColecao.getComponent(0)).setExpandRatio(((HorizontalLayout) cpColecao.getComponent(0))
+				.getComponent(((HorizontalLayout) cpColecao.getComponent(0)).getComponentCount() - 1), 3F);
+		cpColecao.setCanSelect(true);
+		vlFiltros.addComponent(cpColecao);
+
+		cpLinha = new LinhaEditDisplay(true, LABEL_LINHA_PRODUTO);
+		cpLinha.setWidth("100%");
+		cpLinha.getDisplay().setSizeFull();
+		cpLinha.getComponent(0).setWidth("100%");
+		((HorizontalLayout) cpLinha.getComponent(0)).setExpandRatio(((HorizontalLayout) cpLinha.getComponent(0))
+				.getComponent(((HorizontalLayout) cpLinha.getComponent(0)).getComponentCount() - 1), 3F);
+		cpLinha.setCanSelect(true);
+		cpLinha.setCanSelectMessage("Todas!");
+		vlFiltros.addComponent(cpLinha);
+
+		cpMarca = new MarcaEditDisplay(true, LABEL_MARCA);
+		cpMarca.setWidth("100%");
+		cpMarca.getDisplay().setSizeFull();
+		cpMarca.getComponent(0).setWidth("100%");
+		((HorizontalLayout) cpMarca.getComponent(0)).setExpandRatio(((HorizontalLayout) cpMarca.getComponent(0))
+				.getComponent(((HorizontalLayout) cpMarca.getComponent(0)).getComponentCount() - 1), 3F);
+		cpMarca.setCanSelect(true);
+		cpMarca.setCanSelectMessage("Todas!");
+		vlFiltros.addComponent(cpMarca);
+
+		cpRepresentante = new RepresentanteEditDisplay(true, LABEL_REPRESENTANTE);
+		cpRepresentante.setWidth("100%");
+		cpRepresentante.getDisplay().setSizeFull();
+		cpRepresentante.getComponent(0).setWidth("100%");
+		((HorizontalLayout) cpRepresentante.getComponent(0)).setExpandRatio(((HorizontalLayout) cpRepresentante.getComponent(0))
+				.getComponent(((HorizontalLayout) cpRepresentante.getComponent(0)).getComponentCount() - 1), 3F);
+		cpRepresentante.setCanSelect(true);
+		vlFiltros.addComponent(cpRepresentante);
+
+		camposCoringa = new CamposCoringaEngine(this);
+		if (camposCoringa.temIntegracaoCampoCoringa()) {
+			for (Coringa coringa : camposCoringa.getListCoringa()) {
+				CustomFieldInterface field = CamposCoringaEngine.createCoringa(coringa);
+				Integer idx = camposCoringa.getCamposCoringaMap().size() + 1;
+				camposCoringa.getCamposCoringaMap().put(idx, field);
+				this.addCampoDinamico("cpCoringa" + idx, field);
+				Component campo = ((Component) field);
+				if (campo instanceof EditDisplay) {
+					((EditDisplay) campo).setWidth("100%");
+					((EditDisplay) campo).getDisplay().setSizeFull();
+					((EditDisplay) campo).getComponent(0).setWidth("100%");
+					((HorizontalLayout) ((EditDisplay) campo).getComponent(0)).setExpandRatio(
+							((HorizontalLayout) ((EditDisplay) campo).getComponent(0)).getComponent(
+									((HorizontalLayout) ((EditDisplay) campo).getComponent(0)).getComponentCount() - 1),
+							3F);
+				}
+				vlFiltros.addComponent(campo);
+			}
+		}
+
+		slTransparencia = new Slider("Transparência das cores");
+		slTransparencia.setWidth("100%");
+		slTransparencia.setMin(0.0);
+		slTransparencia.setMax(1.0);
+		slTransparencia.setResolution(1);
+		slTransparencia.setImmediate(true);
+		slTransparencia.addListener((ValueChangeListener) this);
+		vlFiltros.addComponent(slTransparencia);
+
+		try {
+			slTransparencia.setValue(Constante.OPACITY);
+		} catch (ValueOutOfBoundsException e) {
+			e.printStackTrace();
+		}
+
+		HorizontalLayout hlBtns = new HorizontalLayout();
+		hlBtns.setSpacing(true);
+
+		btnDetalharTodasRegioes = new Button("Detalhar Todas as Regiões", this);
+		btnDetalharTodasRegioes.setIcon(new ThemeResource("icones/list_bullets_icon&16.png"));
+		hlBtns.addComponent(btnDetalharTodasRegioes);
+		hlBtns.setComponentAlignment(btnDetalharTodasRegioes, Alignment.BOTTOM_CENTER);
+
+		btnMaximizar = new Button("Maximizar Mapa", this);
+		btnMaximizar.setIcon(new ThemeResource("icones/app_window_icon&16.png"));
+		hlBtns.addComponent(btnMaximizar);
+		hlBtns.setComponentAlignment(btnMaximizar, Alignment.BOTTOM_CENTER);
+
+		btnResumoGeral = new Button("Resumo Geral", this);
+		btnResumoGeral.setIcon(new ThemeResource("icones/clipboard_past_icon&16.png"));
+		btnResumoGeral.setDisableOnClick(true);
+		btnResumoGeral.setVisible(false);
+		hlBtns.addComponent(btnResumoGeral);
+		hlBtns.setComponentAlignment(btnResumoGeral, Alignment.BOTTOM_CENTER);
+
+		vlFiltros.addComponent(hlBtns);
+		vlFiltros.setComponentAlignment(hlBtns, Alignment.MIDDLE_CENTER);
+
+		vlFiltrosGeral.addComponent(vlFiltros);
+
+		VerticalLayout vlContent = new VerticalLayout();
+		vlContent.setSpacing(true);
+
+		btnCapturarTela = new Button("", this);
+		btnCapturarTela.setDisableOnClick(true);
+		btnCapturarTela.setWidth("36");
+		btnCapturarTela.setEnabled(false);
+		btnCapturarTela.addStyleName(Reindeer.BUTTON_SMALL);
+		btnCapturarTela.addStyleName("icon-button-small");
+		btnCapturarTela.setIcon(new ThemeResource("icones/photo_icon&12.png"));
+		btnCapturarTela.setDescription("Capturar tela");
+		vlContent.addComponent(btnCapturarTela);
+		vlContent.setComponentAlignment(btnCapturarTela, Alignment.BOTTOM_RIGHT);
+
+		vlLegendaAux = new VerticalLayout();
+		vlLegendaAux.setSpacing(true);
+		vlLegendaAux.setWidth("100%");
+
+		pnLegendaAux = new Panel("", vlLegendaAux);
+
+		vlFiltrosGeral.addComponent(vlContent);
+
+		return vlFiltrosGeral;
+	}
+
+	private Component getTabTabela() {
+		tbLegendas = new Table();
+		tbLegendas.setSize(100, 100, Sizeable.UNITS_PERCENTAGE);
+		tbLegendas.setcolId("id");
+		tbLegendas.addColumn(new TableColumn("id", "Id", false, Long.class));
+		tbLegendas.addColumn(new TableColumn("c1", "Região", true, String.class));
+		tbLegendas.addColumn(new TableColumn("c2", "População", Table.ALIGN_RIGHT, Double.class));
+		tbLegendas.addColumn(new TableColumn("c3", AppData.getVariable("lbIpc").toString(), Table.ALIGN_RIGHT, Double.class, 0, GeoConfigModulos.getPatternIpcDisplay()));
+		tbLegendas.addColumn(new TableColumn("c4", AppData.getVariable("lbPdv").toString(), Table.ALIGN_RIGHT, Double.class, 0, GeoConfigModulos.getPatternPdvDisplay()));
+		tbLegendas.addColumn(new TableColumn("c5", "Cidades", Table.ALIGN_CENTER, Double.class));
+		tbLegendas.addColumn(new TableColumn("c7", LABEL_CLIENTE, Table.ALIGN_CENTER, Double.class));
+		tbLegendas.addColumn(new TableColumn("c8", "Inativos", Table.ALIGN_CENTER, Double.class));
+		tbLegendas.addColumn(new TableColumn("c11", LABEL_PROSPECT, Table.ALIGN_CENTER, Double.class));
+		tbLegendas.addColumn(new TableColumn("c9", "Valor Líquido", Table.ALIGN_RIGHT, Double.class, 2));
+		tbLegendas.addColumn(new TableColumn("c6", "Quantidade", Table.ALIGN_CENTER, Double.class));
+		tbLegendas.addColumn(new TableColumn("10", "Valor Comissão", Table.ALIGN_RIGHT, Double.class, 2));
+		return tbLegendas;
+	}
+
+	private Component getTabLegenda() {
+		VerticalLayout vl = new VerticalLayout();
+		vl.setSpacing(true);
+
+		vlLegendaPnl = new VerticalLayout();//-------------------------------------------------------------------------------------------
+		vlLegendaPnl.setSpacing(true);
+		vlLegendaPnl.setWidth("100%");
+
+		pnLegenda = new Panel("", vlLegendaPnl);
+		pnLegenda.setSizeFull();
+		vl.addComponent(pnLegenda);
+		vl.setExpandRatio(pnLegenda, 2f);
+
+		return vl;
+	}
+
+	@Override
+	public void afterBuildUI() {
+		if (isCVG()) {
+			btnResumoGeral.setVisible(true);
+		}
+	}
+
+	public Boolean isCVG() {
+		return AppData.getAppAccount().getSigla().equals("RN");
+	}
+
+	@Override
+	public void valueChange(ValueChangeEvent event) {
+		if (event.getProperty().equals(cpCenario)) {
+			limparConsulta();
+
+			if (cpCenario.getLogical() == null)
+				return;
+			SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class, cpCenario.getLogical().toString());
+			List<String> listUfs = cenario.getUFs();
+
+			StringBuffer sql = new StringBuffer("SELECT u.id, u.nome FROM GeoUF u ");
+			sql.append("WHERE u.sigla IN (:p1) ");
+			sql.append("ORDER BY 2 ");
+
+			GeoUF ufAnterior = (GeoUF) cpUF.getLogical();
+			cpUF.setSql(sql.toString());
+			cpUF.setParams(ParamsMapFactory.create(listUfs));
+			if (listUfs.isEmpty()) {
+				AppData.showError("Cenário sem dados para visualização!");
+				cpUF.removeAllItems();
+				return;
+			}
+
+			cpUF.load();
+
+			if (ufAnterior != null) {
+				if (listUfs.contains(ufAnterior.getSigla()))
+					cpUF.setLogical(ufAnterior);
+			}
+		} else if (event.getProperty().equals(cpUF)) {
+			btnDetalharTodasRegioes.setVisible(cpUF.getLogical() == null);
+		} else if (event.getProperty().equals(slTransparencia)) {
+			Map<String, Polygon> polygons = map.getPolygons();
+			for (String key : polygons.keySet()) {
+				map.getPolygons().get(key).setFillOpacity((Double) slTransparencia.getValue());
+			}
+		}
+	}
+
+	private void limparConsulta() {
+		mapTemp = new HashMap<>();
+		legendaSel = null;
+
+		resetMap();
+		map.removeAllOverlays();
+		vlLegendaPnl.removeAllComponents();
+		vlLegendaAux.removeAllComponents();
+		tabLocalizaMunicipio.setEnabled(false);
+	}
+
+	@SuppressWarnings("unchecked")
+	private void carregarMapa() {
+		limparConsulta();
+
+		List<GeoUF> listGeoUF = null;
+		GeoUF uf = null;
+
+		if (cpUF.getLogical() != null) {
+			uf = (GeoUF) cpUF.getLogical();
+
+			map.setMapCenter(new LatLng(uf.getLatitude(), uf.getLongitude()));
+			map.setMapZoom(uf.getMapZoom().doubleValue());
+
+		} else {
+			if (cpCenario.getLogical() == null) {
+				return;
+			}
+			SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class, cpCenario.getLogical().toString());
+
+			listGeoUF = new ArrayList<>();
+
+			List<SMCenarioRegiao> listSMCenarioRegiao = (List<SMCenarioRegiao>) SMCenarioRegiao.loadByParameter(
+					SMCenarioRegiao.LER_TODAS_REGIOES_DE_UM_CENARIO, SMCenarioRegiao.class,
+					ParamsMapFactory.create(cenario.getId()));
+			for (SMCenarioRegiao smCenarioRegiao : listSMCenarioRegiao) {
+
+				List<String> listUfs = smCenarioRegiao.getListUfs();
+				for (String ufStr : listUfs) {
+					uf = GeoUF.getBySigla(ufStr);
+					if (uf != null && !listGeoUF.contains(uf)) {
+						listGeoUF.add(uf);
+					}
+					map.setMapCenter(new LatLng(uf.getLatitude(), uf.getLongitude()));
+					map.setMapZoom(uf.getMapZoom().doubleValue());
+				}
+			}
+		}
+
+		legenda = new SMLegenda((SMLegendaClickListener) this);
+
+		SMLegendaItem legendaItem = new SMLegendaItem(SMLegenda.ID_CONFLITO, "Municípios com Conflito", COR_CONFLITO);
+		legendaItem.setRepresentantes(cpRepresentante.getSelectedsList());
+		legendaItem.setUf(uf.getSigla());
+		legenda.addLegendaItem(SMLegenda.ID_CONFLITO, legendaItem);
+
+		if (listGeoUF != null && listGeoUF.isEmpty() == false) {
+			carregarUF(listGeoUF);
+
+		} else {
+			carregarUF(uf);
+
+			Set<String> outrasUFs = new HashSet<String>();
+			for (Long idRegiao : legenda.getItens().keySet()) {
+				outrasUFs.addAll(SMCenarioRegiao.getListUfs(idRegiao));
+			}
+			outrasUFs.remove(uf.getSigla());
+
+			for (String siglaUF : outrasUFs) {
+				carregarUF(siglaUF);
+			}
+
+		}
+
+		vlLegendaPnl.addComponent(legenda.buildUI());
+		vlLegendaAux.addComponent(legenda.buildUILegendaDescricao());
+	}
+
+	private void carregarUF(List<GeoUF> listSiglaUF) {
+		for (GeoUF uf : listSiglaUF) {
+			carregarUF(uf);
+		}
+
+	}
+
+	private void carregarUF(String siglaUF) {
+		GeoUF uf = (GeoUF) GeoUF.getByKey(GeoUF.class, ParamsMapFactory.create(siglaUF));
+		carregarUF(uf);
+	}
+
+	private void carregarUF(GeoUF uf) {
+		tabLocalizaMunicipio.setEnabled(true);
+		municipioEngineQuery.clear();
+		municipioEngineQuery.getCpEstado().setLogical(cpUF.getLogical());
+		repsConflitantes = new ArrayList<String>();
+		String siglaUF = uf.getSigla();
+
+		Random generator = new Random();
+
+		SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class, cpCenario.getLogical().toString());
+		SMTempRegiaoMunicipio temp = new SMTempRegiaoMunicipio(cenario, uf);
+		this.mapTemp.put(siglaUF, temp);
+
+		List<String> listIBGE = new ArrayList<String>(mapTemp.get(siglaUF).getMunicipios().keySet());
+		List<String> colecoes = cpColecao.getSelectedsList();
+		List<String> linhas = cpLinha.getSelectedsList();
+		List<String> marcas = cpMarca.getSelectedsList();
+		List<String> representantes = cpRepresentante.getSelectedsList();
+
+		temp.loadDadosVenda(listIBGE, colecoes, linhas, marcas, representantes, camposCoringa);
+
+		List<String> coresDisponiveis = new LinkedList<String>(CORES);
+		for (String codIBGE : temp.getMunicipios().keySet()) {
+			GeoMunicipio municipio = temp.getMunicipios().get(codIBGE);
+			Integer abrirSubregioes = municipio.getFlagAbrirSubregioes();
+
+			if (municipio.getCodIBGERegiao() != null) {
+				GeoMunicipio municipioRegiao = temp.getMunicipios().get(municipio.getCodIBGERegiao());
+				if (municipioRegiao.getFlagAbrirSubregioes().equals(0))
+					continue;
+			} else if (abrirSubregioes.equals(1)) {
+				continue;
+			}
+
+			List<Overlay> overlays = new ArrayList<Overlay>();
+
+			String cor = COR_SEM_COBERTURA;
+
+			boolean temRepresentante = false;
+
+			// Verifica se tem representante para o municipio
+			if (temp.getMapMunicipioRegiao().containsKey(codIBGE)) {
+				for (SMCenarioRegiao regiao : temp.getMapMunicipioRegiao().get(codIBGE)) {
+					if (representantes.contains(regiao.getCodRepres()) || representantes.size() == 0) {
+						temRepresentante = true;
+						SMLegendaItem item = legenda.getItens().get(regiao.getId());
+						if (item == null) {
+							if (coresDisponiveis.size() <= 0)
+								coresDisponiveis = legenda.getCoresDisponiveis();
+
+							// Escolhe uma nova cor para o novo representante.
+							int idxCor = generator.nextInt(coresDisponiveis.size());
+							cor = coresDisponiveis.get(idxCor);
+							item = new SMLegendaItem(regiao.getId(), regiao.getNome(), cor);
+							item.setColecoes(colecoes);
+							item.setLinhas(linhas);
+							item.setMarcas(marcas);
+							item.setRepresentantes(representantes);
+							item.setCoringas(camposCoringa);
+							item.setUf(siglaUF);
+							legenda.addLegendaItem(regiao.getId(), item);
+							coresDisponiveis.remove(idxCor);
+						} else {
+							cor = item.getCor();
+						}
+
+						item.getIbges().add(codIBGE);
+						item.setPopulacao(item.getPopulacao() + municipio.getPopulacao());
+						legenda.setPopulacaoTotal(
+								legenda.getPopulacaoTotal() + municipio.getPopulacao());
+						item.setIpc(item.getIpc() + municipio.getIpc());
+						item.setPdv(item.getPdv() + municipio.getPdv());
+						legenda.setIpcTotal(legenda.getIpcTotal() + municipio.getIpc());
+						legenda.setPdvTotal(legenda.getPdvTotal() + municipio.getPdv());
+					}
+				}
+
+				// Verifica se tem mais de um representante para o municipio
+				if (temp.getMapMunicipioRegiao().get(codIBGE).size() > 1 && temRepresentante) {
+					List<SMCenarioRegiao> cenarios = temp.getMapMunicipioRegiao().get(codIBGE);
+					for (SMCenarioRegiao itemCenario : cenarios) {
+						if (itemCenario != null) repsConflitantes.add(itemCenario.getNome()); 
+					}
+					legenda.getItens().get(SMLegenda.ID_CONFLITO).getIbges().add(codIBGE);
+					cor = COR_CONFLITO;
+				}
+			}
+
+			// Incluir marker caso não tenha LatLng
+			if (temp.getMapMunicipiosLatLng().get(codIBGE).size() == 0) {
+				Marker marker = new Marker(codIBGE);
+				marker.setClickable(true);
+				marker.setPosition(new LatLng(municipio.getLatitude(), municipio.getLongitude()));
+				marker.setInfoWindowHTML(getInfoWindow(temp, codIBGE));
+
+				map.addMarker(marker);
+				overlays.add(marker);
+			}
+
+			int i = 0;
+			for (GeoMunicipioLatLng latLng : temp.getMapMunicipiosLatLng().get(codIBGE)) {
+				String id = codIBGE + "_" + i;
+				i++;
+
+				if (abrirSubregioes == 0) {
+					Polygon polygon = new Polygon(id);
+					polygon.setClickable(true);
+					polygon.setFillColor(cor);
+					polygon.setStrokeColor("black");
+					polygon.setFillOpacity((Double) slTransparencia.getValue());
+					polygon.setPaths(latLng.getPath());
+					polygon.addListener((br.inf.ibtech.googlemapv3widget.Overlay.ClickListener) this);
+					polygon.addListener((RightClickListener) this);
+					polygon.setInfoWindowHTML(getInfoWindow(temp, codIBGE));
+
+					map.addPolygon(polygon);
+					overlays.add(polygon);
+				} else {
+					Polyline polyline = new Polyline(id);
+					polyline.setStrokeColor("blue");
+					polyline.setStrokeOpacity(0.6d);
+					polyline.setStrokeWeight(5d);
+					polyline.setPaths(latLng.getPathPolilyne());
+					map.addPolyline(polyline);
+					overlays.add(polyline);
+				}
+			}
+			temp.getMapMunicipioOverlays().put(codIBGE, overlays);
+		}
+
+		List<String[]> latitudesUF = GeoUFLatLng.getLatitudesBordaUF(siglaUF);
+
+		for (String[] latLng : latitudesUF) {
+			Polyline polyline = new Polyline(UUID.randomUUID().toString());
+			polyline.setStrokeColor("red");
+			polyline.setStrokeOpacity(0.5d);
+			polyline.setStrokeWeight(5d);
+			polyline.setPaths(GeoMunicipioLatLng.getPathPolilyne(latLng[0], latLng[1]));
+			map.addPolyline(polyline);
+		}
+	}
+
+	private String getInfoWindow(SMTempRegiaoMunicipio temp, String codIBGE) {
+		GeoMunicipio municipio = temp.getMunicipios().get(codIBGE);
+		DadoGenerico dadosMunicipioCliente = temp.getDadosMunicipioClientes().get(codIBGE);
+
+		StringBuffer sb = new StringBuffer();
+
+		sb.append("<center><h3>Informações do Município</h3></center>");
+
+		sb.append("<table border=0>");
+		sb.append("		<tr>");
+		sb.append("			<td align='right'>Cód. IBGE:</td>");
+		sb.append("			<td><b>" + codIBGE + "</b></td>");
+		sb.append("		</tr>");
+
+		sb.append("		<tr>");
+		sb.append("			<td align='right'>Município:</td>");
+		sb.append("			<td><b>" + municipio.getNome() + "/" + municipio.getUf().getSigla() + "</b></td>");
+		sb.append("		</tr>");
+
+		if (municipio.getDdd() != null) {
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>DDD:</td>");
+			sb.append("			<td><b>" + municipio.getDdd() + "</b></td>");
+			sb.append("		</tr>");
+		}
+
+		sb.append("		<tr>");
+		sb.append("			<td align='right'>População:</td>");
+		sb.append("			<td><b>" + municipio.getPopulacao() + "</b></td>");
+		sb.append("		</tr>");
+
+		sb.append("		<tr>");
+		sb.append("			<td align='right'>" + AppData.getVariable("lbIpc").toString() + ":</td>");
+		sb.append("			<td><b>" + municipio.getIpcFormatado() + "</b></td>");
+		sb.append("		</tr>");
+		sb.append("		<tr>");
+		sb.append("			<td align='right'>" + AppData.getVariable("lbPdv").toString() + ":</td>");
+		sb.append("			<td><b>" + municipio.getPdvFormatado() + "</b></td>");
+		sb.append("		</tr>");
+
+		if (dadosMunicipioCliente != null) {
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Qt." + AppData.getVariable("lbClientePlural").toString() + ":</td>");
+			sb.append("			<td><b>" + dadosMunicipioCliente.getQtdeTotalClientes() + "</b></td>");
+			sb.append("		</tr>");
+
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Qt." + AppData.getVariable("lbClientePlural").toString()
+					+ " Ativos:</td>");
+			sb.append("			<td><b>" + dadosMunicipioCliente.getQtdeClientesAtivos() + "</b></td>");
+			sb.append("		</tr>");
+
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Qt." + AppData.getVariable("lbClientePlural").toString()
+					+ " Inativos:</td>");
+			sb.append("			<td><b>" + dadosMunicipioCliente.getQtdeClientesInativos() + "</b></td>");
+			sb.append("		</tr>");
+
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Qt." + AppData.getVariable("lbProspectPlural").toString() + ":</td>");
+			sb.append("			<td><b>" + dadosMunicipioCliente.getQtdeProspects() + "</b></td>");
+			sb.append("		</tr>");
+
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Valor Líquido:</td>");
+			sb.append("			<td><b>" + DF.format(dadosMunicipioCliente.getValorLiquido()) + "</b></td>");
+			sb.append("		</tr>");
+
+			sb.append("		<tr>");
+			sb.append("			<td align='right'>Quantidade:</td>");
+			sb.append("			<td><b>" + DFSEMDECIMAIS.format(dadosMunicipioCliente.getQuantidade()) + "</b></td>");
+			sb.append("		</tr>");
+		}
+
+		sb.append("</table><hr />");
+
+		sb.append("<table border=0>");
+		sb.append("		<tr>");
+		sb.append("			<th>Regiões:</th>");
+		sb.append("		</tr>");
+
+		if (!temp.getMapMunicipioRegiao().containsKey(codIBGE)) {
+			sb.append("		<tr>");
+			sb.append("			<td>Nenhuma Região</td>");
+			sb.append("		</tr>");
+		} else {
+			for (SMCenarioRegiao regiao : temp.getMapMunicipioRegiao().get(codIBGE)) {
+				sb.append("		<tr>");
+				sb.append("			<td>&nbsp;- " + regiao.getNome() + "</td>");
+				sb.append("		</tr>");
+			}
+		}
+
+		sb.append("</table>");
+
+		return sb.toString();
+	}
+
+	private void carregarLegendaTabela() {
+		tbLegendas.clearParam();
+
+		try {
+			Set<String> ufs = this.mapTemp.keySet();
+			if (cpUF.getLogical() != null) {
+				GeoUF uf = (GeoUF) cpUF.getLogical();
+				ufs = new HashSet<String>();
+				ufs.add(uf.getSigla());
+			}
+
+			GeoConfigModulos mod = GeoConfigModulos.getInstance();
+
+			String where = getWhereLegenda();
+			StringBuffer sql = new StringBuffer();
+			int count = 10;
+			for (String uf : ufs) {
+				Map<Long, List<String>> mapRegiaoMunicipios = this.mapTemp.get(uf).getMapRegiaoMunicipios();
+				for (Long idRegiao : mapRegiaoMunicipios.keySet()) {
+
+					if (count > 10) {
+						sql.append(" UNION ");
+					}
+
+					sql.append("SELECT regiao.id, ");
+					sql.append("       regiao.nome, ");
+					sql.append("       (SELECT SUM(mun2.populacao) FROM GeoMunicipio mun2 WHERE mun2.codIBGE IN (:p"
+							+ count + ")) AS populacao, ");
+					sql.append("	   (SELECT SUM(mun2.ipc) FROM GeoMunicipio mun2 WHERE mun2.codIBGE IN (:p" + count
+							+ ")) AS potencial, ");
+					sql.append("	   (SELECT SUM(mun2.pdv) FROM GeoMunicipio mun2 WHERE mun2.codIBGE IN (:p" + count
+							+ ")) AS pdv, ");
+					sql.append("       COUNT(DISTINCT municipio.codIBGE) AS qtdeCidades, ");
+					sql.append("       (SELECT COUNT(DISTINCT cliente.codCliente) FROM GeoMunicipioCliente cliente ");
+					sql.append("                                                  WHERE cliente.codIBGE IN (:p" + count
+							+ ") ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.situacao, '1') = '1' ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.tipo, '1') = '1' ");
+					sql.append(
+							"								                    AND COALESCE(cliente.situacao, '1') <> '99') AS qtdeClientesAtivos, ");
+					sql.append("       (SELECT COUNT(DISTINCT cliente.codCliente) FROM GeoMunicipioCliente cliente ");
+					sql.append("                                                  WHERE cliente.codIBGE IN (:p" + count
+							+ ") ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.situacao, '1') = '0' ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.tipo, '1') = '1' ");
+					sql.append(
+							"								                    AND COALESCE(cliente.situacao, '1') <> '99') AS qtdeClientesInativos, ");
+					sql.append("       (SELECT COUNT(DISTINCT cliente.codCliente) FROM GeoMunicipioCliente cliente ");
+					sql.append("                                                  WHERE cliente.codIBGE IN (:p" + count
+							+ ") ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.situacao, '1') = '1' ");
+					sql.append(
+							"                                                    AND COALESCE(cliente.tipo, '1') = '2' ");
+					sql.append(
+							"								                    AND COALESCE(cliente.situacao, '1') <> '99') AS qtdeProspects, ");
+					sql.append("       SUM(vendas.valorLiquido) AS valorLiquido, ");
+					sql.append("       SUM(vendas.quantidade) AS quantidade, ");
+					if (mod.getFlagUsaComissaoUmDozeAvos() != null && mod.getFlagUsaComissaoUmDozeAvos().intValue() == 1) {
+						sql.append("       SUM(((vendas.valorComissao * 100.00) / 108.3333333333)) AS valorComissao ");
+					} else {
+						sql.append("       SUM(vendas.valorComissao) AS valorComissao ");
+					}
+					sql.append("FROM SMCenarioRegiao regiao ");
+					sql.append("LEFT OUTER JOIN SMCenario cenario ON cenario.id = regiao.cenario_id ");
+					sql.append(
+							"LEFT OUTER JOIN SMCenarioRegiaoMunicipio regiaoMunicipio ON regiaoMunicipio.regiao_id = regiao.id ");
+					sql.append(
+							"LEFT OUTER JOIN GeoMunicipio municipio ON municipio.id = regiaoMunicipio.municipio_id ");
+					sql.append(
+							"LEFT OUTER JOIN GeoVendas1 vendas ON vendas.codEmpresa = :p6 AND vendas.codIBGE = municipio.codIBGE ");
+					sql.append(where);
+
+					List<String> ibges = mapRegiaoMunicipios.get(idRegiao);
+					tbLegendas.setParam("p" + count, ibges);
+
+					count = count + 1;
+					sql.append("AND CAST(regiao.id as text) = (:p" + (count) + ") ");
+					tbLegendas.setParam("p" + count, idRegiao.toString());
+
+					sql.append("GROUP BY regiao.id, regiao.nome ");
+
+					count = count + 1;
+				}
+			}
+			tbLegendas.setNativeSQL(sql.toString());
+			tbLegendas.refresh();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	private String getWhereLegenda() {
+		StringBuffer sql = new StringBuffer();
+		sql.append("WHERE CAST(cenario.id as text) = :p1 ");
+		tbLegendas.setParam("p1", cpCenario.getLogical().toString());
+
+		List<String> colecoes = cpColecao.getSelectedsList();
+		if (!colecoes.isEmpty()) {
+			sql.append("  AND vendas.codColecao IN (:p2) ");
+			tbLegendas.setParam("p2", colecoes);
+		}
+
+		List<String> linhas = cpLinha.getSelectedsList();
+		if (!linhas.isEmpty()) {
+			sql.append("  AND vendas.codLinha IN (:p3) ");
+			tbLegendas.setParam("p3", linhas);
+		}
+
+		List<String> marcas = cpMarca.getSelectedsList();
+		if (!marcas.isEmpty()) {
+			tbLegendas.setParam("p4", marcas);
+			sql.append("  AND vendas.codMarca IN (:p4) ");
+		}
+
+		List<String> representantes = cpRepresentante.getSelectedsList();
+		if (!representantes.isEmpty()) {
+			tbLegendas.setParam("p5", representantes);
+			sql.append("  AND vendas.codRepres IN (:p5) ");
+		}
+
+		int countParam = 6;
+		tbLegendas.setParam("p"+(countParam++), AppData.getCompanyIntegracaoStr());
+		if (camposCoringa.temIntegracaoCampoCoringa()) {
+			for (Integer idx : camposCoringa.getCamposCoringaMap().keySet()) {
+				CustomFieldInterface campoCoringa = camposCoringa.getCamposCoringaMap().get(idx);
+				Object value = camposCoringa.getValue(campoCoringa);
+				String operador = camposCoringa.getOperador(campoCoringa);
+
+				if ((camposCoringa.isEditDisplay(campoCoringa)
+						&& !((EditDisplay) campoCoringa).getSelectedsList().isEmpty())
+						|| (camposCoringa.isCombobox(campoCoringa) && value != null)
+						|| (camposCoringa.isTextfield(campoCoringa) && value != null)) {
+					sql.append(" AND vendas.coringa" + idx + " " + operador + " (:p" + (countParam) + ")");
+					tbLegendas.setParam("p" + (countParam++), value);
+				}
+			}
+		}
+
+		return sql.toString();
+	}
+
+	private void resetMap() {
+		map.setMapCenter(new LatLng(Constante.LATITUDE_BRASIL, Constante.LONGITUDE_BRASIL));
+		map.setMapZoom(Constante.ZOOM_BRASIL);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void buttonClick(ClickEvent event) {          //-------------------------------------//----------------------------------/------------------------
+		try {
+			if (event.getButton().equals(btnConsultar)) {
+				if (cpCenario.getLogical() == null) {
+					AppData.showError("Necessário selecionar um cenário!");
+					return;
+				}
+
+				AppData.getMainWindow().addWindow(new BackgroundTaskWin("Carregar Mapa", "Carregando mapa, aguarde...", null,
+						"Erro ao executar!", new IBCallable<Void>() {
+					@Override
+					public Void callFunction() throws Exception {
+					
+
+						try {
+							carregarMapa();
+							carregarLegendaTabela();
+							btnCapturarTela.setEnabled(true);							
+						} catch (Exception e) {
+							e.printStackTrace();
+							AppData.showError(e);
+						}
+						return null;
+					}
+				}));
+
+
+			} else if (event.getButton().equals(btnResumoGeral)) {
+				if (mapTemp == null || mapTemp.size() == 0) {
+					AppData.showError("Não há dados a serem exportados!");
+					return;
+				}
+
+				List<String> listIBGE = new ArrayList<String>();
+				for (String siglaUF : mapTemp.keySet() ) {
+					listIBGE.addAll(mapTemp.get(siglaUF).getMunicipios().keySet());
+				}
+
+				List<String> colecoes = cpColecao.getSelectedsList();
+				List<String> linhas = cpLinha.getSelectedsList();
+				List<String> marcas = cpMarca.getSelectedsList();
+				List<String> representantes = cpRepresentante.getSelectedsList();
+
+				SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class,
+						cpCenario.getLogical().toString());
+
+
+				SMCenarioQueryWin represMunicipio = new SMCenarioQueryWin(null, listIBGE, colecoes, linhas, marcas, representantes, camposCoringa, cenario);
+				AppData.getMainWindow().addWindow(represMunicipio);
+
+			} else if (event.getButton().equals(btnMaximizar)) {
+				if (cpCenario.getLogical() == null) {
+					AppData.showError("Necessário selecionar um cenário!");
+					return;
+				}
+				popupMapa = new SMMaximizarMapaPopup(map);
+				popupMapa.setModal(true);
+				popupMapa.addListener((CloseListener) this);
+				AppData.getMainWindow().addWindow(popupMapa);
+
+			} else if (event.getButton().equals(btnDetalharTodasRegioes)) {
+				if (cpCenario.getLogical() == null || mapTemp.isEmpty()) {
+					AppData.showError("Necessário selecionar um cenário!");
+					return;
+				}
+
+				List<String> listMuniciopios = new ArrayList<>();
+				SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class,
+						cpCenario.getLogical().toString());
+
+				List<SMCenarioRegiao> listSMCenarioRegiao = (List<SMCenarioRegiao>) SMCenarioRegiao.loadByParameter(
+						SMCenarioRegiao.LER_TODAS_REGIOES_DE_UM_CENARIO, SMCenarioRegiao.class,
+						ParamsMapFactory.create(cenario.getId()));
+				for (SMCenarioRegiao smCenarioRegiao : listSMCenarioRegiao) {
+					List<String> listUfs = smCenarioRegiao.getListUfs();
+					for (String siglaUF : listUfs) {
+						List<String> listEncontrada = mapTemp.get(siglaUF).getMapRegiaoMunicipios()
+								.get(cenario.getId());
+						if (listEncontrada != null && listEncontrada.isEmpty() == false) {
+							listMuniciopios.addAll(listEncontrada);
+						}
+					}
+				}
+
+				List<String> colecoes = cpColecao.getSelectedsList();
+				List<String> linhas = cpLinha.getSelectedsList();
+				List<String> marcas = cpMarca.getSelectedsList();
+				List<String> representantes = cpRepresentante.getSelectedsList();
+				List<String> ufs = cenario.getUFs();
+
+				SMCenarioQueryWin represMunicipio = new SMCenarioQueryWin(ufs, listMuniciopios, colecoes, linhas, marcas, representantes, camposCoringa, cenario, null);
+				AppData.getMainWindow().addWindow(represMunicipio);
+
+			} else if (event.getButton().equals(btnCapturarTela)) {
+				winScreenshot = new VendasMapaScreenShopPopupPanel(pnLegendaAux, map);
+				winScreenshot.addListener((CloseListener) this);
+				winScreenshot.setModal(true);
+				this.getWindow().addWindow(winScreenshot);
+			} else if (event.getButton().equals(btnNovoCenario)) {
+				winCadastroCenario = new SMCadastroPopUp();
+				winCadastroCenario.addListener((CloseListener) this);
+				winCadastroCenario.setModal(true);
+				AppData.getMainWindow().addWindow(winCadastroCenario);
+			}
+
+		} finally {
+			event.getButton().setEnabled(true);
+		}
+	}
+
+	@Override
+	public void legendaClick(SMLegendaItem item) {
+		Long id = item.getId();
+		SMCenario cenario = (SMCenario) BeanController.openById(SMCenario.class, cpCenario.getLogical().toString());
+		List<String> colecoes = cpColecao.getSelectedsList();
+		List<String> linhas = cpLinha.getSelectedsList();
+		List<String> marcas = cpMarca.getSelectedsList();
+		List<String> representantes = new ArrayList<String>();
+		List<String> ibges = item.getIbges();
+		List<String> listRepsSels = cpRepresentante.getSelectedsList();
+
+		if (id != null && id == SMLegenda.ID_CONFLITO && CollectionUtils.isEmpty(listRepsSels)) {
+			representantes = repsConflitantes;
+		} else {
+			representantes = listRepsSels;
+		}
+
+		SMCenarioQueryWin represMunicipio = new SMCenarioQueryWin(cenario.getUFs(), ibges, colecoes, linhas, marcas, representantes, camposCoringa, cenario, id);
+		AppData.getMainWindow().addWindow(represMunicipio);
+	}
+
+	@Override
+	public void coberturaClick(SMLegendaItem item) {
+		Long id = item.getId();
+		String caption = item.getBtnDefinirCobertura().getCaption();
+		String uf = item.getUF();
+		Button btnDefinirCobertura = item.getBtnDefinirCobertura();
+		if (caption.equals(SMLegenda.BTN_CAP_SALVAR)) {
+			mapTemp.get(uf).setListMunicipiosSel(item.getIbges());
+			mapTemp.get(uf).setRegiaoPrincipal((SMCenarioRegiao) SMCenarioRegiao.getById(SMCenarioRegiao.class, id));
+			mapTemp.get(uf).salvar();
+
+			carregarMapa();
+
+			btnDefinirCobertura.setCaption(SMLegenda.BTN_CAP_DEFINIR);
+			btnDefinirCobertura.setDescription(SMLegenda.BTN_DESC_DEFINIR);
+
+			carregarLegendaTabela();
+
+			this.legendaSel = null;
+		} else if (caption.equals(SMLegenda.BTN_CAP_DEFINIR)) {
+			if (legendaSel != null) {
+				AppData.showError("Salve a legenda em edição antes de editar uma nova!");
+				return;
+			}
+
+			marcarPreConflito(item);
+
+			btnDefinirCobertura.setCaption(SMLegenda.BTN_CAP_SALVAR);
+			btnDefinirCobertura.setDescription(SMLegenda.BTN_DESC_SALVAR);
+
+			this.legendaSel = item;
+		}
+	}
+
+	private void marcarPreConflito(SMLegendaItem item) {
+		for (Long idRegiao : mapTemp.get(item.getUF()).getMapRegiaoMunicipios().keySet()) {
+			if (!idRegiao.equals(item.getId()))
+				continue;
+
+			List<String> codIBGEs = legenda.getItens().get(idRegiao).getIbges();
+			for (String codIBGE : codIBGEs) {
+				String id = codIBGE + "_0";
+				Polygon polygon = map.getPolygons().get(id);
+				if (polygon != null) {
+					if (polygon.getFillColor().equals(COR_CONFLITO)) {
+						polygon.setFillColor(item.getCor());
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public void onClick(Overlay mapObject) {
+		if (legendaSel != null) {
+			String overlayId = mapObject.getId();
+			String codIBGE = overlayId.split("[_]")[0];
+
+			GeoMunicipio municipio = GeoMunicipio.getByCodIBGE(codIBGE);
+			if (municipio != null) {
+				for (GeoMunicipioLatLng latLng : mapTemp.get(municipio.getUf().getSigla()).getMapMunicipiosLatLng()
+						.get(codIBGE)) {
+					String siglaUF = latLng.getMunicipio().getUf().getSigla();
+
+					Polygon polygon = map.getPolygons().get(overlayId);
+					if (polygon != null) {
+						polygon.setInfoWindowHTML(null);
+
+						String novaCor = legendaSel.getCor();
+						String corAtual = polygon.getFillColor();
+						if (corAtual.equals(novaCor)) {
+							novaCor = COR_SEM_COBERTURA;
+						}
+
+						polygon.setFillColor(novaCor);
+						marcarMunicipio(codIBGE, novaCor, siglaUF);
+					}
+				}
+			}
+		}
+	}
+
+	private void marcarMunicipio(String codIBGE, String novaCor, String siglaUF) {
+		GeoMunicipio municipio = mapTemp.get(siglaUF).getMunicipios().get(codIBGE);
+		Integer populacao = municipio.getPopulacao();
+		Double populacaoTotal = legenda.getPopulacaoTotal();
+		Double ipc = municipio.getIpc();
+		Double ipcTotal = legenda.getIpcTotal();
+		Double pdv = municipio.getPdv();
+		Double pdvTotal = legenda.getPdvTotal();
+		if (novaCor.equals(legendaSel.getCor()) || novaCor.equals(COR_CONFLITO)) {
+			legendaSel.setPopulacao(legendaSel.getPopulacao() + populacao);
+			legenda.setPopulacaoTotal(populacaoTotal + populacao);
+			legendaSel.setIpc(legendaSel.getIpc() + ipc);
+			legenda.setIpcTotal(ipcTotal + ipc);
+			legendaSel.setPdv(legendaSel.getPdv() + pdv);
+			legenda.setPdvTotal(pdvTotal + pdv);
+			legendaSel.getIbges().add(codIBGE);
+		} else {
+			legendaSel.setPopulacao(legendaSel.getPopulacao() - populacao);
+			legenda.setPopulacaoTotal(populacaoTotal - populacao);
+			legendaSel.setIpc(legendaSel.getIpc() - ipc);
+			legenda.setIpcTotal(ipcTotal - ipc);
+			legendaSel.setPdv(legendaSel.getPdv() - pdv);
+			legenda.setPdvTotal(pdvTotal - pdv);
+			legendaSel.getIbges().remove(codIBGE);
+		}
+
+		legendaSel.refreshValores(populacaoTotal, ipcTotal, pdvTotal);
+	}
+
+	@Override
+	public void onRightClick(Overlay mapObject) {
+		String overlayId = mapObject.getId();
+		String codIBGE = overlayId.split("[_]")[0];
+
+		GeoMunicipio municipio = GeoMunicipio.getByCodIBGE(codIBGE);
+		if (municipio != null && legendaSel != null) {
+			String sigla = municipio.getUf().getSigla();
+			for (GeoMunicipioLatLng latLng : mapTemp.get(sigla).getMapMunicipiosLatLng().get(codIBGE)) {
+				Polygon polygon = map.getPolygons().get(overlayId);
+				if (polygon != null) {
+					polygon.setInfoWindowHTML(getInfoWindow(mapTemp.get(sigla), codIBGE));
+					map.showInfoWindow(polygon,
+							new LatLng(latLng.getMunicipio().getLatitude(), latLng.getMunicipio().getLongitude()));
+				}
+			}
+		} else {
+			popupDetalha = new MunicipioQueryDetalha(codIBGE, camposCoringa);
+			popupDetalha.setModal(true);
+			popupDetalha.addListener((CloseListener) this);
+			AppData.getMainWindow().addWindow(popupDetalha);
+		}
+	}
+
+	@Override
+	public void windowClose(CloseEvent e) {
+		if (e.getWindow().equals(popupDetalha)) {
+			popupDetalha = null;
+		}
+		if (e.getWindow().equals(popupMapa)) {
+			popupMapa = null;
+			hsp.setSecondComponent(map);
+		}
+		if (e.getWindow().equals(winScreenshot)) {
+			hsp.setSecondComponent(map);
+		}
+		if (e.getWindow().equals(winCadastroCenario)) {
+			cpCenario.load();
+		}
+	}
+
+	@Override
+	public MunicipioEngineQuery getLocalizaMunicipio() {
+		return municipioEngineQuery;
+	}
+
+	@Override
+	public CamposCoringaEngine[] getCamposCoringaEngine() {
+		return null;
+	}
+
+	@Override
+	public void selectedTabChange(SelectedTabChangeEvent event) {
+		if (municipioEngineQuery != null) {
+			this.filters = MunicipioGenericFilter.getFiltersFromDisplays(null, cpRepresentante, cpMarca, cpColecao, cpLinha);
+			municipioEngineQuery.setFilters(this.filters);				
+		}
+	}
+}
